@@ -8,9 +8,9 @@
 </style></head>
 <body><main><header><h1>QRGB Studio <span style="font-size:.5em;font-weight:normal;color:#8db5ff">prototype v4</span></h1><p>Encode text or any file into a five-color matrix — <b>white, black, red, green, blue</b> — then recover your data from PNGs or camera photos. All processing happens locally in your browser.</p><div class="chips"><span class="chip" style="background:white"></span><span class="chip" style="background:black"></span><span class="chip" style="background:red"></span><span class="chip" style="background:#00ff00"></span><span class="chip" style="background:blue"></span></div></header>
 <div class="cols"><section><h2>1 · Generate</h2><label for="mode">Input type</label><select id="mode"><option value="text">Text</option><option value="file">Binary file</option></select><div id="textOptions"><label for="textInput">Message</label><textarea id="textInput">Hello from QRGB! 🌈</textarea></div><div id="fileOptions" hidden><label for="fileInput">Choose a file</label><input id="fileInput" type="file"></div><label for="size">Code size</label><select id="size"><option value="81">81 × 81 · small</option><option value="177" selected>177 × 177 · QR-sized</option><option value="577">577 × 577 · 75 KB capable</option><option value="666">666 × 666 · 115.8 KiB capable</option></select><div id="capacity" class="hint"></div><label for="ecc">Error correction</label><select id="ecc"><option value="0">Standard · fixes up to 8 bad bytes per block</option><option value="1">Heavy · fixes up to 64 bad bytes per block (about half the capacity)</option></select><p class="hint">v4 stores the original filename in the header, so recovered files come back with the right name and extension. Standard correction is RS(255,239); Heavy is RS(255,127) — half of every block is parity. The reader detects the level automatically. Dense 577 × 577 and 666 × 666 codes are best saved as PNGs; camera scanning at those sizes is experimental.</p><button id="generate">Generate QRGB</button><button id="download" class="secondary" disabled>Download PNG</button><div id="genStatus" class="status">Ready to encode.</div><div id="genPreview" class="empty">Your generated code appears here</div></section>
-<section><h2>2 · Read</h2><label for="readInput">Upload a QRGB PNG</label><input id="readInput" type="file" accept="image/png,image/*"><p class="hint">PNG decodes directly. For photos, select the four outer grid corners in this order: <b>top-left → top-right → bottom-right → bottom-left</b>. Use a well-lit, sharp image, and select the grid edges (not the white margin).</p>
+<section><h2>2 · Read</h2><label for="readInput">Upload a QRGB PNG</label><input id="readInput" type="file" accept="image/png,image/*"><p class="hint">PNG decodes directly. With the camera, tap <b>Live scan</b> and point at the code — it finds the three colored finder centers (red, green, blue) on its own and decodes when it can; hold steady and let Heavy codes do the rest. For uploaded photos instead, tap the four outer grid corners in this order: <b>top-left → top-right → bottom-right → bottom-left</b>. Use a well-lit, sharp image, and select the grid edges (not the white margin).</p>
 <label for="scanSize">Photo grid size</label><select id="scanSize"><option value="81">81 × 81</option><option value="177" selected>177 × 177</option><option value="577">577 × 577 (high resolution only)</option><option value="666">666 × 666 (high resolution only)</option></select>
-<button id="startCamera" class="secondary">Start camera</button><button id="snap" class="secondary" disabled>Capture frame</button><button id="stopCamera" class="secondary" disabled>Stop camera</button>
+<button id="startCamera" class="secondary">Start camera</button><button id="liveScan" class="secondary" disabled>Live scan</button><button id="torch" class="secondary" hidden>Torch: off</button><button id="snap" class="secondary" disabled>Capture frame</button><button id="stopCamera" class="secondary" disabled>Stop camera</button>
 <video id="camera" autoplay playsinline muted style="display:none;width:100%;border-radius:12px"></video>
 <div class="hint" id="cornerHint">Photo correction: choose an image, then tap four corners on the preview. Press Decode when ready. Exact exported PNGs need no corner selection.</div>
 <button id="resetCorners" class="secondary">Reset selected corners</button><button id="readBtn">Decode PNG</button><button id="saveDecoded" class="secondary" disabled>Download recovered file</button><div id="readStatus" class="status">Ready to decode.</div><div id="readPreview" class="empty">Uploaded code appears here</div><canvas id="cornerCanvas" style="display:none;width:100%;max-width:500px;touch-action:manipulation;cursor:crosshair;border:1px solid #657892;border-radius:9px"></canvas><label>Recovered content</label><output id="readOutput">No data decoded yet.</output></section></div>
@@ -61,20 +61,206 @@ function finder(ox,oy,center){for(let dy=0;dy<7;dy++)for(let dx=0;dx<7;dx++){let
 finder(0,0,2);finder(n-7,0,3);finder(0,n-7,4);return cells;}
 function draw(cells,n){let s=SCALE[n],w=(n+QUIET*2)*s;let can=document.createElement('canvas');can.width=can.height=w;let ctx=can.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,w,w);for(let y=0;y<n;y++)for(let x=0;x<n;x++){let c=COLORS[cells[y*n+x]];if(cells[y*n+x]===0)continue;ctx.fillStyle=`rgb(${c[0]},${c[1]},${c[2]})`;ctx.fillRect((x+QUIET)*s,(y+QUIET)*s,s,s);}return can;}
 function nearest(r,g,b){let best=-1,dist=Infinity;for(let i=0;i<COLORS.length;i++){let c=COLORS[i],d=(r-c[0])**2+(g-c[1])**2+(b-c[2])**2;if(d<dist){dist=d;best=i;}}if(dist>1200)throw Error('Unrecognized pixel color. Use the original PNG, without scaling or compression.');return best;}
-function decodeDigits(digits,n){let byteCount=Math.floor(digits.length/14)*4,all=new Uint8Array(byteCount);for(let k=0;k<Math.floor(digits.length/14);k++){let v=0;for(let j=0;j<14;j++)v=v*5+digits[k*14+j];if(v>0xFFFFFFFF)throw Error('Invalid base-5 group');let off=k*4;all[off]=Math.floor(v/16777216);all[off+1]=Math.floor(v/65536)%256;all[off+2]=Math.floor(v/256)%256;all[off+3]=v%256;}
+function decodeDigits(digits,n){let byteCount=Math.floor(digits.length/14)*4,all=new Uint8Array(byteCount);for(let k=0;k<Math.floor(digits.length/14);k++){let v=0;for(let j=0;j<14;j++)v=v*5+digits[k*14+j];if(v>0xFFFFFFFF)v%=4294967296;let off=k*4;all[off]=Math.floor(v/16777216);all[off+1]=Math.floor(v/65536)%256;all[off+2]=Math.floor(v/256)%256;all[off+3]=v%256;}
 let version=1,ecc=0;if(!MAGIC.every((v,i)=>all[i]===v)||all[4]!==1){let d=null;try{let t=rsDecodeStream(all,16);if(MAGIC.every((v,i)=>t[i]===v)&&(t[4]===2||t[4]===3||(t[4]===4&&t[14]===0)))d=t;}catch(e){}if(!d){try{let t=rsDecodeStream(all,128);if(MAGIC.every((v,i)=>t[i]===v)&&t[4]===4&&t[14]===1)d=t;}catch(e){}}if(!d)throw Error('Not a recognizable QRGB code, or photo is too damaged.');all=d;version=all[4];ecc=version===4?all[14]:0;}
 let view=new DataView(all.buffer),len=view.getUint32(5,false),crc=view.getUint32(9,false);let nameLen=version>=3?all[13]:0;if(len>all.length-16-nameLen)throw Error('Header length exceeds capacity');let name='';if(nameLen){try{name=new TextDecoder('utf-8',{fatal:true}).decode(all.slice(16,16+nameLen));}catch{name='';}}let content=all.slice(16+nameLen,16+nameLen+len);if(crc32(content)!==crc)throw Error('CRC-32 mismatch: unrecoverable data corruption.');return{bytes:content,n,crc,version,name,ecc};}
-function decodeImagePixels(ctx,n,project,colorSamples=null){let img=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height),pix=img.data,w=img.width,h=img.height;
+function snapCenter(pix,w,h,C,u,v,pu,pv){
+// Refine a finder center by symmetry: along each grid axis the luminance profile is dark(3x3) - bright(moat) - dark(border), with moat centers at +-2 modules. The midpoint of the two moat centers is the true center, free of the classification-bleed bias that shifts raw blob centroids.
+function lum(x,y){x=Math.round(x);y=Math.round(y);if(x<0||y<0||x>=w||y>=h)return 0;let i=(y*w+x)*4;return (pix[i]+pix[i+1]+pix[i+2])/3;}
+function axisOff(dir,pitch){
+// Generative fit of the finder cross-section: along either axis through the center the profile is [black ring | white moat | COLORED 3x3 | white moat | black ring], boundaries at 1.5 / 2.5 / 3.5 modules. Camera blur (~1.3 px) is part of the model — the ideal segment profile is Gaussian-blurred before comparison — and the three segment levels are fit linearly per candidate (offset, pitch) by least squares. Narrow features under blur bias edge-picking methods; a blurred-template LS lock does not have that bias.
+let T=3.5*pitch,step=pitch*0.05,ts=[],vs=[];
+for(let t=-T;t<=T;t+=step){ts.push(t);vs.push(lum(C[0]+dir[0]*t,C[1]+dir[1]*t));}
+// detrend: a shading slope across the profile must not distort the lock
+{let mt=0,mv=0;for(let i=0;i<ts.length;i++){mt+=ts[i];mv+=vs[i];}mt/=ts.length;mv/=vs.length;let num=0,den=0;for(let i=0;i<ts.length;i++){num+=(ts[i]-mt)*(vs[i]-mv);den+=(ts[i]-mt)*(ts[i]-mt);}let sl=den?num/den:0;for(let i=0;i<ts.length;i++)vs[i]-=sl*(ts[i]-mt);}
+let sig=1.3;
+function sse(off,pit){let sm=sig/pit;
+// blurred white/color indicator values at each sample; only samples inside the candidate's own +/-3.5 module window count (beyond the finder the surroundings are not black)
+let S=[[0,0,0],[0,0,0],[0,0,0]],b=[0,0,0],sv=0,svv=0,cnt=0;
+for(let i=0;i<ts.length;i++){if(Math.abs(ts[i]-off)>3.5*pit)continue;cnt++;let m=(ts[i]-off)/pit,am=Math.abs(m);
+let wb=0,cb=0,ws=0;
+for(let k=-2;k<=2;k++){let mm=am+k*sm*0.7,wgt=Math.exp(-(k*0.7)*(k*0.7)/2);let seg=mm<1.5?1:(mm<2.5?2:0);if(seg===2)wb+=wgt;else if(seg===1)cb+=wgt;ws+=wgt;}
+wb/=ws;cb/=ws;
+let row=[1,wb,cb],v=vs[i];sv+=v;svv+=v*v;
+for(let a=0;a<3;a++){b[a]+=row[a]*v;for(let c=0;c<3;c++)S[a][c]+=row[a]*row[c];}}
+// solve 3x3 normal equations
+let M=[[...S[0],b[0]],[...S[1],b[1]],[...S[2],b[2]]];
+for(let c=0;c<3;c++){let p=c;for(let r=c+1;r<3;r++)if(Math.abs(M[r][c])>Math.abs(M[p][c]))p=r;if(Math.abs(M[p][c])<1e-9)return 1e18;let tmp=M[c];M[c]=M[p];M[p]=tmp;
+for(let r=0;r<3;r++){if(r===c)continue;let f=M[r][c]/M[c][c];for(let k=c;k<4;k++)M[r][k]-=f*M[c][k];}}
+let x0=M[0][3]/M[0][0],x1=M[1][3]/M[1][1],x2=M[2][3]/M[2][2];
+return cnt?(svv-(b[0]*x0+b[1]*x1+b[2]*x2))/cnt:1e18;}
+let best=null;
+for(let pf=0.78;pf<=1.241;pf+=0.012)for(let of=-0.55;of<=0.551;of+=0.06){let s=sse(of*pitch,pitch*pf);if(!best||s<best[0])best=[s,of,pf];}
+for(let pf=best[2]-0.012;pf<=best[2]+0.0121;pf+=0.002)for(let of=best[1]-0.06;of<=best[1]+0.0601;of+=0.01){let s=sse(of*pitch,pitch*pf);if(s<best[0])best=[s,of,pf];}
+let mean=vs.reduce((x,y)=>x+y,0)/vs.length,varr=0;for(let v of vs)varr+=(v-mean)*(v-mean);varr/=vs.length;
+if(best[0]>0.5*varr)return{off:0,pitch:null};
+return{off:best[1]*pitch,pitch:pitch*best[2]};}
+let au=axisOff(u,pu),av=axisOff(v,pv);
+return{pt:[C[0]+u[0]*au.off+v[0]*av.off,C[1]+u[1]*au.off+v[1]*av.off],pu:au.pitch,pv:av.pitch};}
+function applyH(hp,x,y){let w=hp[6]*x+hp[7]*y+1;return [(hp[0]*x+hp[1]*y+hp[2])/w,(hp[3]*x+hp[4]*y+hp[5])/w];}
+function jacH(hp,x,y){let w=hp[6]*x+hp[7]*y+1;let X=(hp[0]*x+hp[1]*y+hp[2])/w,Y=(hp[3]*x+hp[4]*y+hp[5])/w;return [(hp[0]-X*hp[6])/w,(hp[1]-X*hp[7])/w,(hp[3]-Y*hp[6])/w,(hp[4]-Y*hp[7])/w];}
+function solveN(A,b){let n=b.length,m=A.map((r,i)=>[...r,b[i]]);
+for(let i=0;i<n;i++){let p=i;for(let k=i+1;k<n;k++)if(Math.abs(m[k][i])>Math.abs(m[p][i]))p=k;if(Math.abs(m[p][i])<1e-12)return null;[m[i],m[p]]=[m[p],m[i]];let q=m[i][i];for(let j=i;j<=n;j++)m[i][j]/=q;for(let k=0;k<n;k++)if(k!==i){let f=m[k][i];for(let j=i;j<=n;j++)m[k][j]-=f*m[i][j];}}
+return m.map(r=>r[n]);}
+function fitH(centers,span){
+// Homography from 3 point correspondences plus each point's local module-step vectors (Jacobian). Three points alone leave the far corner underdetermined under keystone; the Jacobians pin it. Gauss-Newton on 8 parameters, numeric derivatives, affine init.
+let [p0,p1,p2]=centers;
+function aff(get){let m=[[p0.m[0],p0.m[1],1,get(p0)],[p1.m[0],p1.m[1],1,get(p1)],[p2.m[0],p2.m[1],1,get(p2)]];let s=solveN(m.slice(0,3).map(r=>r.slice(0,3)),m.map(r=>r[3]));return s;}
+let ax=aff(c=>c.p[0]),ay=aff(c=>c.p[1]);if(!ax||!ay)return null;
+let hp=[ax[0],ax[1],ax[2],ay[0],ay[1],ay[2],0,0];
+let W=span/3;
+function resid(h){let r=[];for(let c of centers){let [X,Y]=applyH(h,c.m[0],c.m[1]);let J=jacH(h,c.m[0],c.m[1]);
+// snapCenter measured the module pitch along two photo rays (the global axis directions) through each center. The model's pitch along a ray is 1/|J^-1 * rayDir| — compare exactly that, so no local-axis direction approximation enters the fit.
+let det=J[0]*J[3]-J[1]*J[2];
+let pu=Math.hypot(c.ju[0],c.ju[1]),pv=Math.hypot(c.jv[0],c.jv[1]);
+let aux=c.ju[0]/pu,auy=c.ju[1]/pu,avx=c.jv[0]/pv,avy=c.jv[1]/pv;
+let rayPitch=(dx,dy)=>{if(Math.abs(det)<1e-9)return 0;let ex=(J[3]*dx-J[1]*dy)/det,ey=(-J[2]*dx+J[0]*dy)/det;return 1/Math.hypot(ex,ey);};
+r.push(X-c.p[0],Y-c.p[1],W*(rayPitch(aux,auy)-pu),W*(rayPitch(avx,avy)-pv));}return r;}
+for(let iter=0;iter<30;iter++){
+let r0=resid(hp);let J=[];for(let k=0;k<8;k++){let eps=1e-6*(1+Math.abs(hp[k]));let h2=hp.slice();h2[k]+=eps;let rk=resid(h2);J.push(rk.map((v,i)=>(v-r0[i])/eps));}
+let A=Array.from({length:8},()=>new Array(8).fill(0)),b=new Array(8).fill(0);
+for(let i=0;i<8;i++)for(let j=0;j<8;j++){let s=0;for(let t=0;t<r0.length;t++)s+=J[i][t]*J[j][t];A[i][j]=s;}
+for(let i=0;i<8;i++){let s=0;for(let t=0;t<r0.length;t++)s+=J[i][t]*r0[t];b[i]=-s;A[i][i]+=1e-9;}
+let d=solveN(A,b);if(!d)return null;
+let mx=0;for(let k=0;k<8;k++){hp[k]+=d[k];mx=Math.max(mx,Math.abs(d[k]));}
+if(!hp.every(isFinite))return null;
+if(mx<1e-10)break;}
+return hp;}
+function detectCorners(pix,w,h,n){
+let step=Math.max(1,Math.floor(Math.max(w,h)/1600));
+let gw=Math.ceil(w/step),gh=Math.ceil(h/step);
+let cls=new Int8Array(gw*gh),lum=new Uint8Array(gw*gh);
+for(let gy=0;gy<gh;gy++)for(let gx=0;gx<gw;gx++){let x=gx*step,y=gy*step,i=(y*w+x)*4,r=pix[i],g=pix[i+1],b=pix[i+2];lum[gy*gw+gx]=(r+g+b)/3;
+let sr=r-Math.max(g,b),sg=g-Math.max(r,b),sb=b-Math.max(r,g);
+if(r>90&&sr>55&&sr>=sg&&sr>=sb)cls[gy*gw+gx]=2;else if(g>90&&sg>55&&sg>=sr&&sg>=sb)cls[gy*gw+gx]=3;else if(b>90&&sb>55&&sb>=sr&&sb>=sg)cls[gy*gw+gx]=4;}
+let parent=new Int32Array(gw*gh);for(let i=0;i<parent.length;i++)parent[i]=i;
+function find(a){while(parent[a]!==a){parent[a]=parent[parent[a]];a=parent[a];}return a;}
+for(let gy=0;gy<gh;gy++)for(let gx=0;gx<gw;gx++){let idx=gy*gw+gx,c=cls[idx];if(!c)continue;
+if(gx+1<gw&&cls[idx+1]===c){let ra=find(idx),rb=find(idx+1);if(ra!==rb)parent[ra]=rb;}
+if(gy+1<gh&&cls[idx+gw]===c){let ra=find(idx),rb=find(idx+gw);if(ra!==rb)parent[ra]=rb;}}
+let comps={};
+for(let gy=0;gy<gh;gy++)for(let gx=0;gx<gw;gx++){let idx=gy*gw+gx,c=cls[idx];if(!c)continue;let key=c+'_'+find(idx);let o=comps[key]||(comps[key]={c,sx:0,sy:0,cnt:0,minx:gx,maxx:gx,miny:gy,maxy:gy});o.sx+=gx;o.sy+=gy;o.cnt++;if(gx<o.minx)o.minx=gx;if(gx>o.maxx)o.maxx=gx;if(gy<o.miny)o.miny=gy;if(gy>o.maxy)o.maxy=gy;}
+function ringLum(cx,cy,rad){let s=0,cnt=0;let per=24;for(let k=0;k<per;k++){let t=k/per*4;let dx,dy;if(t<1){dx=-rad+t*2*rad;dy=-rad;}else if(t<2){dx=rad;dy=-rad+(t-1)*2*rad;}else if(t<3){dx=rad-(t-2)*2*rad;dy=rad;}else{dx=-rad;dy=rad-(t-3)*2*rad;}
+let x=Math.round(cx+dx),y=Math.round(cy+dy);if(x<0||y<0||x>=gw||y>=gh)continue;s+=lum[y*gw+x];cnt++;}
+return cnt?s/cnt:255;}
+let cand={2:[],3:[],4:[]};
+for(let key in comps){let o=comps[key];if(o.cnt<4)continue;let bw=o.maxx-o.minx+1,bh=o.maxy-o.miny+1;if(bw/bh<0.45||bw/bh>2.2)continue;
+let m=Math.sqrt(o.cnt),cx=o.sx/o.cnt,cy=o.sy/o.cnt;
+// Radial luminance profile: a finder center sits inside dark-bright-dark square rings (black 3x3, white moat, black border). Find the bright moat ring scale-free; its radius is ~2 modules, so half of it estimates the local module pitch.
+let prof=[],rs=[];for(let r=0.6;r<=4.6;r+=0.25){rs.push(r*m);prof.push(ringLum(cx,cy,r*m));}
+let iB=-1,bv=-1;for(let i=0;i<rs.length;i++){if(rs[i]<1.2*m||rs[i]>3.4*m)continue;if(prof[i]>bv){bv=prof[i];iB=i;}}
+if(iB<1)continue;
+let before=Math.min(...prof.slice(0,iB)),after=Math.min(...prof.slice(iB+1));
+let q=Math.min(bv-before,bv-after);
+if(bv-before>55&&bv-after>45)cand[o.c].push({x:cx*step,y:cy*step,m:rs[iB]*step/2,q});}
+if(!cand[2].length||!cand[3].length||!cand[4].length)return null;
+for(let c of[2,3,4]){let qmax=Math.max(...cand[c].map(o=>o.q));cand[c]=cand[c].filter(o=>o.q>=0.7*qmax);if(cand[c].length>60)cand[c]=cand[c].slice(0,60);}
+let best=null,bestScore=Infinity;
+for(let R of cand[2])for(let G of cand[3])for(let B of cand[4]){
+let a=Math.hypot(G.x-R.x,G.y-R.y),b=Math.hypot(B.x-R.x,B.y-R.y);if(!a||!b)continue;
+let ratio=a/b;if(ratio<0.62||ratio>1.6)continue;
+let dot=((G.x-R.x)*(B.x-R.x)+(G.y-R.y)*(B.y-R.y))/(a*b);if(Math.abs(dot)>0.42)continue;
+let hyp=Math.hypot(a,b),cc=Math.hypot(G.x-B.x,G.y-B.y);if(Math.abs(cc-hyp)/hyp>0.38)continue;
+if(Math.min(a,b)<18*Math.max(R.m,G.m,B.m))continue;
+if(Math.min(a,b)<0.20*Math.min(w,h))continue; // a real code being scanned fills a good part of the frame; tiny look-alike clusters are impostors
+let score=Math.abs(1-ratio)+Math.abs(dot)+Math.abs(cc-hyp)/hyp-(R.q+G.q+B.q)/200;
+if(score<bestScore){bestScore=score;best=[R,G,B];}}
+if(!best)return null;
+let R=best[0],G=best[1],B=best[2];
+// Snap each center to its ring symmetry (removes the systematic centroid bias; also yields the local module pitch per axis from the moat spacing). Then build each grid corner from two short projective steps: step 3.5 modules out from a center along each center line (a Mobius step anchored by the leg length and the local pitch), and intersect the two local edge lines. Short steps stay well-conditioned even under strong keystone.
+let span=n-7;
+let la=Math.hypot(G.x-R.x,G.y-R.y),lb=Math.hypot(B.x-R.x,B.y-R.y);
+let u=[(G.x-R.x)/la,(G.y-R.y)/la],v=[(B.x-R.x)/lb,(B.y-R.y)/lb];
+let sR=snapCenter(pix,w,h,[R.x,R.y],u,v,la/span,lb/span),sG=snapCenter(pix,w,h,[G.x,G.y],u,v,la/span,lb/span),sB=snapCenter(pix,w,h,[B.x,B.y],u,v,la/span,lb/span);
+let R2=sR.pt,G2=sG.pt,B2=sB.pt;
+let Lrg=Math.hypot(G2[0]-R2[0],G2[1]-R2[1]),Lrb=Math.hypot(B2[0]-R2[0],B2[1]-R2[1]);
+let urg=[(G2[0]-R2[0])/Lrg,(G2[1]-R2[1])/Lrg],vrb=[(B2[0]-R2[0])/Lrb,(B2[1]-R2[1])/Lrb];
+let centers=[
+{m:[3.5,3.5],p:R2,ju:[u[0]*(sR.pu||la/span),u[1]*(sR.pu||la/span)],jv:[v[0]*(sR.pv||lb/span),v[1]*(sR.pv||lb/span)]},
+{m:[n-3.5,3.5],p:G2,ju:[u[0]*(sG.pu||la/span),u[1]*(sG.pu||la/span)],jv:[v[0]*(sG.pv||lb/span),v[1]*(sG.pv||lb/span)]},
+{m:[3.5,n-3.5],p:B2,ju:[u[0]*(sB.pu||la/span),u[1]*(sB.pu||la/span)],jv:[v[0]*(sB.pv||lb/span),v[1]*(sB.pv||lb/span)]}];
+let hp=fitH(centers,span);
+if(hp)return [applyH(hp,0,0),applyH(hp,n,0),applyH(hp,n,n),applyH(hp,0,n)];
+let ex=[(G2[0]-R2[0])/span,(G2[1]-R2[1])/span],ey=[(B2[0]-R2[0])/span,(B2[1]-R2[1])/span];
+let at=(cx,cy,a,b)=>[cx+a*ex[0]+b*ey[0],cy+a*ex[1]+b*ey[1]];
+let BC=[G2[0]+(B2[0]-R2[0]),G2[1]+(B2[1]-R2[1])];
+return [at(R2[0],R2[1],-3.5,-3.5),at(G2[0],G2[1],3.5,-3.5),at(BC[0],BC[1],3.5,3.5),at(B2[0],B2[1],-3.5,3.5)];}
+function makeSampler(pix,w,h,n,project,colorSamples=null){
 function sample(x,y){let [u,v]=project(x,y),px=Math.round(u),py=Math.round(v);if(px<0||py<0||px>=w||py>=h)throw Error('Grid corner selection extends outside photo');let idx=(py*w+px)*4;return [pix[idx],pix[idx+1],pix[idx+2]];}
-// Calibrate colors from finder locations (works for original RGB with white balance drift).
-let ref=colorSamples||[sample(1.5,1.5),sample(0.5,0.5),sample(3.5,3.5),sample(n-3.5,3.5),sample(3.5,n-3.5)];
+// Calibrate colors from finder locations (works for original RGB with white balance drift). Each reference is the best sample in a 3x3 module neighborhood (brightest white, darkest black, most saturated color), so calibration stays correct even when the sampling warp is off by a module near a finder.
+let ref=colorSamples||(()=>{function pick(x,y,score){let best=null,bv=null;for(let dx of[-0.6,0,0.6])for(let dy of[-0.6,0,0.6]){let s=sample(x+dx,y+dy);let v=score(s);if(bv===null||v>bv){bv=v;best=s;}}return best;}
+let lum=s=>s[0]+s[1]+s[2];let sat=c=>s=>s[c]-Math.max(s[(c+1)%3],s[(c+2)%3]);
+return [pick(1.5,1.5,lum),pick(0.5,0.5,s=>-lum(s)),pick(3.5,3.5,sat(0)),pick(n-3.5,3.5,sat(1)),pick(3.5,n-3.5,sat(2))];})();
 // ref[0] white is a white finder ring; ref[1] black outer corner.
-function classify(rgb){let best=0,dmin=Infinity;for(let c=0;c<5;c++){let d=0;for(let k=0;k<3;k++)d+=(rgb[k]-ref[c][k])**2;if(d<dmin){dmin=d;best=c;}}return best;}
-let digits=new Uint8Array(usable(n)),k=0;for(let y=0;y<n;y++)for(let x=0;x<n;x++){if(reserved(n,x,y))continue;let votes=[0,0,0,0,0];for(let [dx,dy] of [[.5,.5],[.35,.35],[.65,.65]])votes[classify(sample(x+dx,y+dy))]++;let max=0;for(let j=1;j<5;j++)if(votes[j]>votes[max])max=j;digits[k++]=max;}return decodeDigits(digits,n);}
+function dists(rgb){let d=[];for(let c=0;c<5;c++){let s=0;for(let k=0;k<3;k++)s+=(rgb[k]-ref[c][k])**2;d.push(s);}return d;}
+function classify(rgb){let d=dists(rgb),best=0;for(let c=1;c<5;c++)if(d[c]<d[best])best=c;return best;}
+function digitAt(x,y){let votes=[0,0,0,0,0];for(let [dx,dy] of [[.5,.5],[.35,.35],[.65,.65]])votes[classify(sample(x+dx,y+dy))]++;let max=0;for(let j=1;j<5;j++)if(votes[j]>votes[max])max=j;return max;}
+function marginAt(x,y){let d=dists(sample(x+0.5,y+0.5));let s=[...d].sort((a,b)=>a-b);return s[1]-s[0];}
+function confAt(x,y){let d=dists(sample(x+0.5,y+0.5));let s=[...d].sort((a,b)=>a-b);return (s[1]-s[0])/(s[1]+s[0]+1);}
+return{digitAt,marginAt,confAt};}
+function decodePixels(pix,w,h,n,project,colorSamples=null){let smp=makeSampler(pix,w,h,n,project,colorSamples);let digits=new Uint8Array(usable(n)),k=0;for(let y=0;y<n;y++)for(let x=0;x<n;x++){if(reserved(n,x,y))continue;digits[k++]=smp.digitAt(x,y);}return decodeDigits(digits,n);}
+function refineCorners(pix,w,h,n,pts){
+// Grid-lock refinement: starting from approximately correct corners, nudge each corner along the two edge directions to maximize total classification confidence over the whole data grid. At the true geometry every sample lands mid-module on a pure color (high confidence); a sub-module misregistration smears samples across module edges (low confidence). The confidence landscape is smooth within ~1 module of the truth, which is where the finder-based estimate lands.
+let stride=Math.max(1,Math.round(Math.sqrt(usable(n)/2000)));
+let pos=[];for(let y=0;y<n;y+=stride)for(let x=0;x<n;x+=stride)if(!reserved(n,x,y))pos.push([x,y]);
+// The three finder patterns have KNOWN digits. Confidence over data modules alone is aliased (a one-module shift still lands on pure colors), but a shift misaligns the finders — scoring finder agreement breaks the tie toward the true geometry.
+let fpos=[];for(let [ox,oy,cc] of [[0,0,2],[n-7,0,3],[0,n-7,4]])for(let dy=0;dy<7;dy++)for(let dx=0;dx<7;dx++){let border=dx===0||dy===0||dx===6||dy===6;let inner=dx>=2&&dx<=4&&dy>=2&&dy<=4;fpos.push([ox+dx,oy+dy,inner?cc:(border?1:0)]);}
+let ex=[(pts[1][0]-pts[0][0])/n,(pts[1][1]-pts[0][1])/n],ey=[(pts[3][0]-pts[0][0])/n,(pts[3][1]-pts[0][1])/n];
+function score(cand){try{let smp=makeSampler(pix,w,h,n,homography(cand,n));let tot=0;for(let [x,y] of pos)tot+=smp.confAt(x,y);for(let [x,y,d] of fpos)tot+=smp.digitAt(x,y)===d?5:-5;return tot;}catch(e){return -1;}}
+let best=pts.map(p=>[p[0],p[1]]),bestScore=score(best);
+// Move set: single corners, edge pairs, whole-code translation, and radial scale. Coordinated moves cross valleys that single-corner steps cannot (the score peak is at the truth, but the path there is not monotone per-corner).
+function moves(base,step){let ms=[];let cen=[(base[0][0]+base[1][0]+base[2][0]+base[3][0])/4,(base[0][1]+base[1][1]+base[2][1]+base[3][1])/4];
+function add(idxs,d,s){ms.push([idxs,d,s]);}
+for(let c=0;c<4;c++){add([c],ex,step);add([c],ex,-step);add([c],ey,step);add([c],ey,-step);}
+for(let pr of [[0,1],[3,2]]){add(pr,ey,step);add(pr,ey,-step);}
+for(let pr of [[0,3],[1,2]]){add(pr,ex,step);add(pr,ex,-step);}
+add([0,1,2,3],ex,step);add([0,1,2,3],ex,-step);add([0,1,2,3],ey,step);add([0,1,2,3],ey,-step);
+for(let s of [1,-1]){let cand=base.map(p=>{let dx=p[0]-cen[0],dy=p[1]-cen[1];let L=Math.hypot(dx,dy)||1;return [p[0]+s*step*6.5*dx/L,p[1]+s*step*6.5*dy/L];});ms.push(['scale',cand]);}
+return ms;}
+function descend(from,fromScore,steps){let cur=from,curScore=fromScore;
+for(let step of steps){
+for(let sweep=0;sweep<3;sweep++){let improved=false;
+for(let mv of moves(cur,step)){let cand;
+if(mv[0]==='scale')cand=mv[1];
+else{let [idxs,d,s]=mv;cand=cur.map(p=>[p[0],p[1]]);for(let c of idxs){cand[c]=[cand[c][0]+s*d[0],cand[c][1]+s*d[1]];}}
+let sc=score(cand);
+if(sc>curScore){curScore=sc;cur=cand;improved=true;}}
+if(!improved)break;}}
+return [cur,curScore];}
+[best,bestScore]=descend(best,bestScore,[0.6,0.3,0.15,0.07]);
+// Random-restart escapes (deterministic LCG): perturb each corner by up to ~0.45 module and re-descend the fine steps; keep the best basin found.
+let lcgState=(n*2654435761)>>>0;function rnd(){lcgState=(lcgState*1664525+1013904223)>>>0;return lcgState/4294967296;}
+for(let r=0;r<5;r++){let pert=best.map(p=>{let a=(rnd()*2-1)*0.45,b=(rnd()*2-1)*0.45;return [p[0]+a*ex[0]+b*ey[0],p[1]+a*ex[1]+b*ey[1]];});
+let [cand,candScore]=descend(pert,score(pert),[0.3,0.15,0.07]);
+if(candScore>bestScore){best=cand;bestScore=candScore;}}
+// Stage B: RS-aware descent. Confidence alone saturates a few percent short of decodable; the real objective is per-block correction margin. Read the header from block 0, then hill-climb the corners on the summed margin of sampled blocks (decodable blocks score cap-minus-corrections, failures score -cap).
+let allPos=[];for(let y=0;y<n;y++)for(let x=0;x<n;x++)if(!reserved(n,x,y))allPos.push([x,y]);
+function blockBytes(smp,bs,be){let g=Math.floor(bs/4)*4,out=[];
+for(let d0=g*7/2;d0<Math.ceil(be*7/2);d0+=14){let v=0;for(let j=0;j<14;j++){let p=allPos[d0+j];if(!p)break;v=v*5+smp.digitAt(p[0],p[1]);}if(v>0xFFFFFFFF)v%=4294967296;out.push(Math.floor(v/16777216),Math.floor(v/65536)%256,Math.floor(v/256)%256,v%256);}
+return Uint8Array.from(out.slice(bs-g,bs-g+(be-bs)));}
+function tryBlock(raw,nsym){try{let dec=rsDecodeBlock(raw,nsym);let corr=0;for(let i=0;i<raw.length;i++)if(dec[i]!==raw[i])corr++;return corr;}catch(e){return -1;}}
+let plan=null;
+try{let smp=makeSampler(pix,w,h,n,homography(best,n));
+let nbCap=Math.floor(Math.floor(allPos.length/14)*4/255);let sample=[];for(let k=0;k<10;k++)sample.push(Math.floor(k*nbCap/10));
+// ECC level detection without the header (block 0 may itself be past the limit): the true nsym is the one under which sampled blocks actually decode.
+let ok16=0,ok128=0;for(let b of sample){let raw=blockBytes(smp,b*255,(b+1)*255);if(tryBlock(raw,16)>=0)ok16++;if(tryBlock(raw,128)>=0)ok128++;}
+if(ok16||ok128)plan={nsym:ok128>ok16?128:16,blocks:sample};}catch(e){}
+if(plan){let cap=plan.nsym/2;
+function bscore(cand){let smp=makeSampler(pix,w,h,n,homography(cand,n));let tot=0;
+for(let b of plan.blocks){let raw=blockBytes(smp,b*255,(b+1)*255);let corr=tryBlock(raw,plan.nsym);
+if(corr>=0)tot+=cap-corr;else{let nz=0;try{let sy=syndromes(raw,plan.nsym);for(let s of sy)if(s)nz++;}catch(e){nz=plan.nsym;}tot-=cap+Math.min(nz,plan.nsym)/2;}}return tot;}
+let bBest=bscore(best);
+for(let step of [0.3,0.15,0.07]){
+for(let c=0;c<4;c++)for(let ax=0;ax<2;ax++)for(let sgn of [1,-1]){
+let cand=best.map(p=>[p[0],p[1]]);let d=ax?ey:ex;
+cand[c]=[cand[c][0]+sgn*step*d[0],cand[c][1]+sgn*step*d[1]];
+let sc=bscore(cand);if(sc>bBest){bBest=sc;best=cand;}}}}
+return best;}
+function decodeImagePixels(ctx,n,project,colorSamples=null){let img=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height);return decodePixels(img.data,img.width,img.height,n,project,colorSamples);}
 function directRead(image){let w=image.naturalWidth,h=image.naturalHeight;if(w!==h)throw Error('PNG not square; choose four corners for perspective correction.');let n=SIZES.find(n=>w===(n+QUIET*2)*SCALE[n]);if(!n)throw Error('Not an original-size QRGB PNG; select four grid corners below.');let s=SCALE[n],ctx=document.createElement('canvas').getContext('2d',{willReadFrequently:true});ctx.canvas.width=w;ctx.canvas.height=h;ctx.drawImage(image,0,0);return decodeImagePixels(ctx,n,(x,y)=>[(x+QUIET)*s,(y+QUIET)*s]);}
 function solveLinear(a,b){let n=b.length,m=a.map((r,i)=>[...r,b[i]]);for(let i=0;i<n;i++){let p=i;for(let k=i+1;k<n;k++)if(Math.abs(m[k][i])>Math.abs(m[p][i]))p=k;if(Math.abs(m[p][i])<1e-9)throw Error('Invalid selected corners');[m[i],m[p]]=[m[p],m[i]];let q=m[i][i];for(let j=i;j<=n;j++)m[i][j]/=q;for(let k=0;k<n;k++)if(k!==i){let f=m[k][i];for(let j=i;j<=n;j++)m[k][j]-=f*m[i][j];}}return m.map(r=>r[n]);}
 function homography(pts,n){let src=[[0,0],[n,0],[n,n],[0,n]],a=[],b=[];for(let i=0;i<4;i++){let [x,y]=src[i],[u,v]=pts[i];a.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);a.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);}let h=solveLinear(a,b);return(x,y)=>{let w=h[6]*x+h[7]*y+1;return[(h[0]*x+h[1]*y+h[2])/w,(h[3]*x+h[4]*y+h[5])/w];};}
-function photoRead(image,pts,n){let ctx=document.createElement('canvas').getContext('2d',{willReadFrequently:true});ctx.canvas.width=image.naturalWidth;ctx.canvas.height=image.naturalHeight;ctx.drawImage(image,0,0);return decodeImagePixels(ctx,n,homography(pts,n));}
+function photoRead(image,pts,n){let ctx=document.createElement('canvas').getContext('2d',{willReadFrequently:true});ctx.canvas.width=image.naturalWidth;ctx.canvas.height=image.naturalHeight;ctx.drawImage(image,0,0);let img=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height);let refined=refineCorners(img.data,img.width,img.height,n,pts);return decodePixels(img.data,img.width,img.height,n,homography(refined,n));}
 function setStatus(id,msg,bad=false){let e=$(id);e.textContent=msg;e.className='status'+(bad?' error':'');}
 function showPreview(id,can){let e=$(id);e.replaceChildren();can.className='preview';can.style.width='100%';can.style.maxWidth='500px';e.appendChild(can);}
 function downloadBlob(blob,name){let url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);}
@@ -88,10 +274,26 @@ $('cornerCanvas').addEventListener('click',e=>{if(!sourceImage||corners.length==
 $('resetCorners').addEventListener('click',()=>{corners=[];drawCorners();});
 async function loadImageFromFile(file){let image=new Image(),url=URL.createObjectURL(file);try{await new Promise((ok,bad)=>{image.onload=ok;image.onerror=()=>bad(Error('Could not open image'));image.src=url;});}finally{URL.revokeObjectURL(url);}sourceImage=image;corners=[];previewSource(image);}
 $('readInput').addEventListener('change',async()=>{try{if($('readInput').files[0])await loadImageFromFile($('readInput').files[0]);}catch(e){setStatus('readStatus',e.message,true);}});
-$('startCamera').addEventListener('click',async()=>{try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera requires HTTPS or localhost, and browser permission. Open this app on an HTTPS site for camera access.');cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});let video=$('camera');video.srcObject=cameraStream;video.style.display='block';await video.play();$('snap').disabled=false;$('stopCamera').disabled=false;setStatus('readStatus','Camera ready. Center code, then Capture frame.');}catch(e){setStatus('readStatus','Camera unavailable: '+e.message,true);}});
-$('stopCamera').addEventListener('click',()=>{if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null;}$('camera').srcObject=null;$('camera').style.display='none';$('snap').disabled=true;$('stopCamera').disabled=true;});
+$('startCamera').addEventListener('click',async()=>{try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Camera requires HTTPS or localhost, and browser permission. Open this app on an HTTPS site for camera access.');cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});let video=$('camera');video.srcObject=cameraStream;video.style.display='block';await video.play();$('snap').disabled=false;$('stopCamera').disabled=false;$('liveScan').disabled=false;let track=cameraStream.getVideoTracks()[0];if(track&&track.getCapabilities&&track.getCapabilities().torch)$('torch').hidden=false;setStatus('readStatus','Camera ready. Tap Live scan and point at a code, or Capture frame for manual corners.');}catch(e){setStatus('readStatus','Camera unavailable: '+e.message,true);}});
+$('stopCamera').addEventListener('click',()=>{stopScan();if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null;}$('camera').srcObject=null;$('camera').style.display='none';$('snap').disabled=true;$('stopCamera').disabled=true;$('liveScan').disabled=true;$('torch').hidden=true;});
 $('snap').addEventListener('click',async()=>{try{let video=$('camera'),c=document.createElement('canvas');c.width=video.videoWidth;c.height=video.videoHeight;if(!c.width)throw Error('Camera is not ready');c.getContext('2d').drawImage(video,0,0);let image=new Image();image.src=c.toDataURL('image/png');await image.decode();sourceImage=image;corners=[];previewSource(image);setStatus('readStatus','Frame captured. Tap the four corners on the picture, then Decode.');}catch(e){setStatus('readStatus',e.message,true);}});
-$('readBtn').addEventListener('click',async()=>{try{if(!sourceImage){let f=$('readInput').files[0];if(!f)throw Error('Choose an image or capture a frame first.');await loadImageFromFile(f);}let result;if(corners.length===4){result=photoRead(sourceImage,corners,Number($('scanSize').value));}else{result=directRead(sourceImage);}decodedBytes=result.bytes;decodedName=result.name?result.name.split(/[\\/]/).pop():'qrgb-recovered.bin';$('saveDecoded').disabled=false;let str=new TextDecoder('utf-8',{fatal:true});try{let t=str.decode(decodedBytes);$('readOutput').textContent=t||'(Empty message)';if(!result.name)decodedName='qrgb-recovered.txt';}catch{$('readOutput').textContent='Binary file recovered ('+decodedBytes.length+' bytes). Use Download recovered file.';}setStatus('readStatus',`SUCCESS: ${decodedBytes.length.toLocaleString()} bytes recovered (v${result.version}${result.name?', as "'+decodedName+'"':''}${result.version===4?(result.ecc?', heavy error correction':', standard error correction'):''}). CRC-32 verified (${result.crc.toString(16).padStart(8,'0')}).`);}catch(e){decodedBytes=null;$('saveDecoded').disabled=true;setStatus('readStatus',e.message,true);$('readOutput').textContent='Decode failed.';}});
+function presentDecode(result){decodedBytes=result.bytes;decodedName=result.name?result.name.split(/[\\/]/).pop():'qrgb-recovered.bin';$('saveDecoded').disabled=false;let str=new TextDecoder('utf-8',{fatal:true});try{let t=str.decode(decodedBytes);$('readOutput').textContent=t||'(Empty message)';if(!result.name)decodedName='qrgb-recovered.txt';}catch{$('readOutput').textContent='Binary file recovered ('+decodedBytes.length+' bytes). Use Download recovered file.';}setStatus('readStatus',`SUCCESS: ${decodedBytes.length.toLocaleString()} bytes recovered (v${result.version}${result.name?', as "'+decodedName+'"':''}${result.version===4?(result.ecc?', heavy error correction':', standard error correction'):''}). CRC-32 verified (${result.crc.toString(16).padStart(8,'0')}).`);}
+let scanning=false,scanTimer=null,scanAttempts=0,scanSeen=false,scanFull=null;
+function stopScan(){scanning=false;if(scanTimer){clearInterval(scanTimer);scanTimer=null;}let b=$('liveScan');if(b)b.textContent='Live scan';}
+function scanTick(){let video=$('camera');if(!scanning||!video.videoWidth)return;let n=Number($('scanSize').value);
+try{if(!scanFull)scanFull=document.createElement('canvas');
+scanFull.width=video.videoWidth;scanFull.height=video.videoHeight;let fx=scanFull.getContext('2d',{willReadFrequently:true});fx.drawImage(video,0,0);
+let fimg=fx.getImageData(0,0,scanFull.width,scanFull.height);
+let pts=detectCorners(fimg.data,fimg.width,fimg.height,n);
+if(!pts){if(!scanSeen)setStatus('readStatus','Live scan: looking for a code — center it in the frame…');return;}
+scanSeen=true;
+let refined=refineCorners(fimg.data,fimg.width,fimg.height,n,pts);
+let result=decodePixels(fimg.data,fimg.width,fimg.height,n,homography(refined,n));
+stopScan();if(navigator.vibrate)navigator.vibrate(120);presentDecode(result);
+}catch(e){scanAttempts++;setStatus('readStatus','Live scan: code in view — decoding, hold steady (attempt '+scanAttempts+')…');}}
+$('liveScan').addEventListener('click',()=>{if(scanning){stopScan();setStatus('readStatus','Live scan stopped.');return;}if(!cameraStream){setStatus('readStatus','Start the camera first.',true);return;}scanning=true;scanAttempts=0;scanSeen=false;$('liveScan').textContent='Stop scan';setStatus('readStatus','Live scan: looking for a code — center it in the frame…');scanTimer=setInterval(scanTick,350);});
+let torchOn=false;$('torch').addEventListener('click',async()=>{try{let track=cameraStream&&cameraStream.getVideoTracks()[0];if(!track)throw Error('No camera');torchOn=!torchOn;await track.applyConstraints({advanced:[{torch:torchOn}]});$('torch').textContent=torchOn?'Torch: on':'Torch: off';}catch(e){setStatus('readStatus','Torch unavailable: '+e.message,true);}});
+$('readBtn').addEventListener('click',async()=>{try{if(!sourceImage){let f=$('readInput').files[0];if(!f)throw Error('Choose an image or capture a frame first.');await loadImageFromFile(f);}let result;if(corners.length===4){result=photoRead(sourceImage,corners,Number($('scanSize').value));}else{result=directRead(sourceImage);}presentDecode(result);}catch(e){decodedBytes=null;$('saveDecoded').disabled=true;setStatus('readStatus',e.message,true);$('readOutput').textContent='Decode failed.';}});
 $('saveDecoded').addEventListener('click',()=>{if(decodedBytes)downloadBlob(new Blob([decodedBytes],{type:'application/octet-stream'}),decodedName);});
 })();
 </script></body></html>
