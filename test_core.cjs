@@ -5,8 +5,8 @@ let named=decodeDigits(digitsFromCells(encode(Uint8Array.from({length:64},(_,i)=
 console.log('v3 filename',named.version,named.name,Buffer.compare(Buffer.from(named.bytes),Buffer.from(Uint8Array.from({length:64},(_,i)=>(i*7+3)%256))));
 let longNamed=decodeDigits(digitsFromCells(encode(new TextEncoder().encode('x'),81,'a'.repeat(300)+'.pdf'),81),81);
 console.log('v3 long filename bytes',new TextEncoder().encode(longNamed.name).length,longNamed.name.endsWith('.pdf'));
-// 600 x 600 grid: a 91.4 KiB (93,594-byte) payload plus filename fits again (v1-era headroom, with RS)
+// 666 x 666 grid: a 91.4 KiB (93,594-byte) payload plus filename fits again (v1-era headroom, with RS)
 let big=Uint8Array.from({length:93594},(_,i)=>(i*53+11)%256);
-let bigRt=decodeDigits(digitsFromCells(encode(big,600,'big.pdf'),600),600);
-console.log('600 roundtrip',bigRt.bytes.length,bigRt.name,Buffer.compare(Buffer.from(bigRt.bytes),Buffer.from(big)));
+let bigRt=decodeDigits(digitsFromCells(encode(big,666,'big.pdf'),666),666);
+console.log('666 roundtrip',bigRt.bytes.length,bigRt.name,Buffer.compare(Buffer.from(bigRt.bytes),Buffer.from(big)));
 try{encode(big,577,'big.pdf');console.log('577 overflow NOT detected');}catch(e){console.log('577 still rejects 93,594 bytes + filename as expected');}
