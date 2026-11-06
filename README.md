@@ -8,7 +8,7 @@ Open `index.html` on a computer to generate and decode lossless QRGB PNGs. To us
 
 ## Capabilities
 
-- Generate text or binary payloads in 81 × 81, 177 × 177, or 577 × 577 modules.
+- Generate text or binary payloads in 81 × 81, 177 × 177, 577 × 577, or 600 × 600 modules (600 × 600 holds 96,301 bytes ≈ 94.0 KiB — above even the v1 no-error-correction maximum of 95,048 bytes at 577).
 - Base-5 packing: 14 color modules per 4 data bytes.
 - Version 2 embeds Reed–Solomon RS(255,239) parity (up to 8 corrupted bytes per 255-byte codeword), plus CRC-32 integrity verification.
 - Version 3 stores the original filename (up to 255 bytes, extension preserved when truncating) between the header and the payload, inside the same error correction — recovered files download under their real name instead of `qrgb-recovered.bin`. Text payloads are stored as `message.txt`.
@@ -25,6 +25,6 @@ Open `index.html` on a computer to generate and decode lossless QRGB PNGs. To us
 
 ## Checks
 
-Run `node test_core.cjs` to check encode/decode round trips at 81, 177, and 577 modules (including a 75,000-byte payload), successful correction of 1, 4, or 8 corrupted bytes and rejection of 9 errors in one codeword, and v3 filename round trips (including the 255-byte cap with extension preserved).
+Run `node test_core.cjs` to check encode/decode round trips at 81, 177, and 577 modules (including a 75,000-byte payload), successful correction of 1, 4, or 8 corrupted bytes and rejection of 9 errors in one codeword, v3 filename round trips (including the 255-byte cap with extension preserved), and a 93,594-byte (91.4 KiB) payload round trip at 600 × 600.
 
 The photo/camera UI still needs field testing on physical devices.
