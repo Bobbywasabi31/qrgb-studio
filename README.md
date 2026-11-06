@@ -1,4 +1,4 @@
-# QRGB Studio v3
+# QRGB Studio v4
 
 An experimental five-color data matrix format using white, black, red, green, and blue modules. **Not compatible with standard QR scanners.**
 
@@ -12,8 +12,9 @@ Open `index.html` on a computer to generate and decode lossless QRGB PNGs. To us
 - Base-5 packing: 14 color modules per 4 data bytes.
 - Version 2 embeds Reed–Solomon RS(255,239) parity (up to 8 corrupted bytes per 255-byte codeword), plus CRC-32 integrity verification.
 - Version 3 stores the original filename (up to 255 bytes, extension preserved when truncating) between the header and the payload, inside the same error correction — recovered files download under their real name instead of `qrgb-recovered.bin`. Text payloads are stored as `message.txt`.
+- Version 4 adds a selectable **Heavy** error-correction level: RS(255,127) — half of every 255-byte block is parity, correcting up to 64 corrupted bytes per block (vs 8 for Standard). The level is flagged in the header and the reader detects it automatically. Cost: about half the capacity (at 666 × 666, Heavy holds 62,976 bytes vs 118,528 for Standard), so a 91.4 KiB file needs Standard at 666, or Heavy at a smaller file size.
 - Recover bytes from exported PNG or a photo with perspective correction and calibrated color classification.
-- Version 1 and 2 PNGs remain supported for decoding. (The reverse is not true: a v2 reader rejects v3 codes.)
+- Version 1, 2, and 3 PNGs remain supported for decoding. (The reverse is not true: older readers reject newer codes.)
 - All processing is performed locally in the browser.
 
 ## Limitations
@@ -25,6 +26,6 @@ Open `index.html` on a computer to generate and decode lossless QRGB PNGs. To us
 
 ## Checks
 
-Run `node test_core.cjs` to check encode/decode round trips at 81, 177, and 577 modules (including a 75,000-byte payload), successful correction of 1, 4, or 8 corrupted bytes and rejection of 9 errors in one codeword, v3 filename round trips (including the 255-byte cap with extension preserved), and a 93,594-byte (91.4 KiB) payload round trip at 666 × 666.
+Run `node test_core.cjs` to check encode/decode round trips at 81, 177, and 577 modules (including a 75,000-byte payload), successful correction of 1, 4, or 8 corrupted bytes and rejection of 9 errors in one codeword, v3 filename round trips (including the 255-byte cap with extension preserved), a 93,594-byte (91.4 KiB) payload round trip at 666 × 666, and v4 Heavy correction limits (64 corrupted bytes per block corrected, 65 rejected) plus end-to-end digit-damage recovery at both levels.
 
 The photo/camera UI still needs field testing on physical devices.
