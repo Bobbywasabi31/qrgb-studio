@@ -1,22 +1,29 @@
-# QRGB Studio
+# QRGB Studio v2
 
-Encode text or any file into a five-color matrix — **white, black, red, green, blue** — then decode the PNG back to the original bytes. Single self-contained HTML file, everything runs in the browser, offline.
+An experimental five-color data matrix format using white, black, red, green, and blue modules. **Not compatible with standard QR scanners.**
 
-**Open `index.html` in any browser to use it.** No build step, no dependencies.
+## Run
 
-## The QRGB format (v1)
+Open `index.html` on a computer to generate and decode lossless QRGB PNGs. To use the phone camera, host the file on **HTTPS**, such as GitHub Pages, because browsers usually prohibit camera access from insecure origins. Use "Capture frame" and manually tap the code's four grid corners in this order: top-left, top-right, bottom-right, bottom-left. Select corners of the colored grid, excluding its white quiet-zone margin, then choose the grid size and decode. Camera scanning is an experimental feature.
 
-- Every data module is one of five symbols (base 5). Each group of **14 modules stores 4 bytes** (5¹⁴ > 2³²).
-- Three finder markers identify the corners, each with a distinct RGB center (red, green, blue) so orientation is unambiguous.
-- A 16-byte header stores the magic `QRGB`, format version, content length, and a CRC-32 checksum. The reader verifies the checksum before accepting recovered data.
-- Grid sizes: 81 × 81, 177 × 177 (QR-sized), and 577 × 577 (~75 KB payload).
+## Capabilities
+
+- Generate text or binary payloads in 81 × 81, 177 × 177, or 577 × 577 modules.
+- Base-5 packing: 14 color modules per 4 data bytes.
+- Version 2 embeds Reed–Solomon RS(255,239) parity (up to 8 corrupted bytes per 255-byte codeword), plus CRC-32 integrity verification.
+- Recover bytes from exported PNG or a photo with perspective correction and calibrated color classification.
+- Old version 1 PNGs remain supported for decoding.
+- All processing is performed locally in the browser.
 
 ## Limitations
 
-- This is a **new format, not a standard QR code** — ordinary phone QR readers cannot scan it.
-- **No forward error correction yet.** Decoding requires the original lossless PNG at exact dimensions; camera photos, screenshots with borders, and scaled/compressed images won't read.
-- Camera/print scanning will need calibration, perspective correction, and error correction — future work.
+- Camera/photo decoding requires manual corner selection and sufficiently sharp, well-lit source images. Dense 577 × 577 codes are unlikely to scan reliably from normal smartphone photos without very high effective spatial resolution.
+- RS correction is byte-level, and large perspective errors or strong blur can overwhelm it.
+- The exported PNG is not a standard ISO QR code; no ordinary QR scanner can decode it.
+- The format is experimental, without a finalized interoperable specification.
 
-## Status
+## Checks
 
-Prototype v1. Generator and reader are both in `index.html`.
+Run `node test_core.cjs` to check encode/decode round trips at 81, 177, and 577 modules (including a 75,000-byte payload), plus successful correction of 1, 4, or 8 corrupted bytes and rejection of 9 errors in one codeword.
+
+The photo/camera UI still needs field testing on physical devices.
